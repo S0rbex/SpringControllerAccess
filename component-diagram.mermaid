@@ -1,0 +1,82 @@
+flowchart TB
+    subgraph ClientLayer["Клієнтський рівень"]
+        User["Користувач<br/>(наприклад: відділ SALES, роль USER)"]
+    end
+
+    subgraph SpringApp["Spring Boot Застосунок (RAG Core & Security)"]
+        direction TB
+        
+        Security["Spring Security Context<br/>- JWT / Session Claims<br/>- Ролі та відділ: HR, SALES, DEV"]
+        Controller["Query REST Controller<br/>Прийом запитів від клієнта"]
+        
+        subgraph Layer1["🛡️ ШАР 1: Pre-retrieval фільтрація доступу"]
+            SecFilter["Metadata Filter Builder<br/>Побудова предикатів доступу<br/>(e.g., 'department == SALES')"]
+        end
+        
+        RagOrchestrator["RAG Orchestrator Service<br/>(Координатор конвеєра RAG)"]
+        
+        subgraph Layer2["🛡️ ШАР 2: De-identification (Маскування PII)"]
+            PIIService["PII Masking Service<br/>Агрегатор знеособлення"]
+            UARegex["UA Regex Engine<br/>ІПН (10 цифр), тел. (+380...), ПІБ"]
+        end
+        
+        subgraph Layer3["🛡️ ШАР 3: Безпечна генерація відповіді"]
+            SpringAI["Spring AI ChatClient<br/>Формування захищеного системного промпту"]
+        end
+        
+        subgraph Layer4["🛡️ ШАР 4: Post-generation перевірка витоків"]
+            OutputGuard["Output Guardrail Service<br/>LLM-as-a-Judge / Евристичний валідатор"]
+        end
+        
+        subgraph AuditSystem["📋 Наскрізний аудит"]
+            AuditLogger["Access & Audit Logger<br/>Фіксація: запит, ролі, чанки, PII, вердикт"]
+        end
+    end
+
+    subgraph ExternalServices["Зовнішні та інфраструктурні сервіси"]
+        PgVector[("Векторна БД pgvector<br/>(PostgreSQL + HNSW / IVFFlat)<br/>Документи з метаданими доступу")]
+        Presidio["Microsoft Presidio Service<br/>(Analyzer & Anonymizer API)"]
+        LLM["Велика Мовна Модель (LLM)<br/>OpenAI / Локальна LLM"]
+        AuditDB[("Журнал доступу<br/>(Access Log DB / Elasticsearch)")]
+    end
+
+    User -->|"1. POST /api/query (Запит + Токен)"| Controller
+    Controller -->|"2. Вилучення Principal & Roles"| Security
+    Controller -->|"3. Запуск RAG-пайплайну"| RagOrchestrator
+    
+    RagOrchestrator -->|"4. Передача ролей для фільтра"| SecFilter
+    SecFilter -->|"5. Similarity search + Metadata filter"| PgVector
+    PgVector -->|"6. Лише дозволені чанки"| RagOrchestrator
+
+    RagOrchestrator -->|"7. Сирий контекст на маскування"| PIIService
+    PIIService -->|"8a. Детекція загальних сутностей"| Presidio
+    PIIService -->|"8b. Детекція українських форматів"| UARegex
+    PIIService -->|"9. Замасковані чанки [PERSON_1], [TAX_ID_1]"| RagOrchestrator
+
+    RagOrchestrator -->|"10. Запит + Замаскований контекст"| SpringAI
+    SpringAI -->|"11. Безпечний Chat Completion"| LLM
+    LLM -->|"12. Згенерована відповідь"| SpringAI
+    SpringAI -->|"13. Відповідь моделі"| RagOrchestrator
+
+    RagOrchestrator -->|"14. Перевірка на залишковий витік"| OutputGuard
+    OutputGuard -->|"15. Вердикт: SAFE / LEAK_DETECTED"| RagOrchestrator
+
+    RagOrchestrator -.->|"16. Асинхронний запис події аудиту"| AuditLogger
+    AuditLogger -.->|"Збереження журналу"| AuditDB
+
+    RagOrchestrator -->|"17. Фінальна безпечна відповідь"| Controller
+    Controller -->|"18. JSON Response"| User
+
+    classDef layer1 fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef layer2 fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef layer3 fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef layer4 fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef audit fill:#ede7f6,stroke:#512da8,stroke-width:2px;
+    classDef storage fill:#eceff1,stroke:#455a64,stroke-width:2px;
+
+    class Layer1,SecFilter layer1;
+    class Layer2,PIIService,UARegex layer2;
+    class Layer3,SpringAI layer3;
+    class Layer4,OutputGuard layer4;
+    class AuditSystem,AuditLogger audit;
+    class PgVector,Presidio,LLM,AuditDB storage;

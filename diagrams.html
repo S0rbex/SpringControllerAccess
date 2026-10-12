@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Архітектура багатошарового захисту RAG-застосунку</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            margin: 0;
+            padding: 30px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0f172a;
+            font-size: 26px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 12px;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #64748b;
+            font-size: 15px;
+            margin-bottom: 30px;
+        }
+        .badge-list {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        .badge {
+            background: #e2e8f0;
+            color: #334155;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 40px;
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #1e293b;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background: #fafafa;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .info-table th, .info-table td {
+            border: 1px solid #e2e8f0;
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 14px;
+        }
+        .info-table th {
+            background: #f1f5f9;
+            color: #334155;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ Багатошаровий захист RAG-застосунку від витоку даних</h1>
+        <div class="subtitle">
+            Курсова робота НаУКМА: «Методи та засоби контролю доступу й запобігання витоку конфіденційних даних у Java-застосунках на основі великих мовних моделей із RAG-архітектурою»<br/>
+            Студент: Мартинишин Віталій Ігорович | Науковий керівник: Андрощук Максим Віталійович
+        </div>
+
+        <div class="badge-list">
+            <span class="badge">Spring Boot 3.x</span>
+            <span class="badge">Spring AI</span>
+            <span class="badge">PostgreSQL + pgvector</span>
+            <span class="badge">Microsoft Presidio</span>
+            <span class="badge">UA Regex PII Engine</span>
+            <span class="badge">Latency &lt; 200 ms</span>
+        </div>
+
+        <div class="card">
+            <h2>1. Схема архітектури компонентів (Component Diagram)</h2>
+            <div class="mermaid">
+flowchart TB
+    subgraph ClientLayer["Клієнтський рівень"]
+        User["Користувач<br/>(відділ SALES, роль USER)"]
+    end
+
+    subgraph SpringApp["Spring Boot Застосунок (RAG Core & Security)"]
+        direction TB
+        
+        Security["Spring Security Context<br/>- JWT / Session Claims<br/>- Ролі та відділ: HR, SALES, DEV"]
+        Controller["Query REST Controller<br/>Прийом запитів від клієнта"]
+        
+        subgraph Layer1["🛡️ ШАР 1: Pre-retrieval фільтрація доступу"]
+            SecFilter["Metadata Filter Builder<br/>Побудова предикатів доступу<br/>(e.g., 'department == SALES')"]
+        end
+        
+        RagOrchestrator["RAG Orchestrator Service<br/>(Координатор конвеєра RAG)"]
+        
+        subgraph Layer2["🛡️ ШАР 2: De-identification (Маскування PII)"]
+            PIIService["PII Masking Service<br/>Агрегатор знеособлення"]
+            UARegex["UA Regex Engine<br/>ІПН (10 цифр), тел. (+380...), ПІБ"]
+        end
+        
+        subgraph Layer3["🛡️ ШАР 3: Безпечна генерація відповіді"]
+            SpringAI["Spring AI ChatClient<br/>Формування захищеного системного промпту"]
+        end
+        
+        subgraph Layer4["🛡️ ШАР 4: Post-generation перевірка витоків"]
+            OutputGuard["Output Guardrail Service<br/>LLM-as-a-Judge / Евристичний валідатор"]
+        end
+        
+        subgraph AuditSystem["📋 Наскрізний аудит"]
+            AuditLogger["Access & Audit Logger<br/>Фіксація: запит, ролі, чанки, PII, вердикт"]
+        end
+    end
+
+    subgraph ExternalServices["Зовнішні та інфраструктурні сервіси"]
+        PgVector[("Векторна БД pgvector<br/>(PostgreSQL + HNSW / IVFFlat)<br/>Документи з метаданими доступу")]
+        Presidio["Microsoft Presidio Service<br/>(Analyzer & Anonymizer API)"]
+        LLM["Велика Мовна Модель (LLM)<br/>OpenAI / Локальна LLM"]
+        AuditDB[("Журнал доступу<br/>(Access Log DB / Elasticsearch)")]
+    end
+
+    User -->|"1. POST /api/query"| Controller
+    Controller -->|"2. Principal & Roles"| Security
+    Controller -->|"3. Запуск RAG"| RagOrchestrator
+    
+    RagOrchestrator -->|"4. Ролі для фільтра"| SecFilter
+    SecFilter -->|"5. Search + Metadata filter"| PgVector
+    PgVector -->|"6. Тільки дозволені чанки"| RagOrchestrator
+
+    RagOrchestrator -->|"7. Сирий контекст"| PIIService
+    PIIService -->|"8a. Загальні сутності"| Presidio
+    PIIService -->|"8b. UA формати"| UARegex
+    PIIService -->|"9. Замасковані чанки"| RagOrchestrator
+
+    RagOrchestrator -->|"10. Запит + Замаскований контекст"| SpringAI
+    SpringAI -->|"11. Chat Completion"| LLM
+    LLM -->|"12. Згенерована відповідь"| SpringAI
+    SpringAI -->|"13. Відповідь моделі"| RagOrchestrator
+
+    RagOrchestrator -->|"14. Перевірка на витік"| OutputGuard
+    OutputGuard -->|"15. SAFE / LEAK"| RagOrchestrator
+
+    RagOrchestrator -.->|"16. Асинхронний лог"| AuditLogger
+    AuditLogger -.->|"Збереження"| AuditDB
+
+    RagOrchestrator -->|"17. Фінальна відповідь"| Controller
+    Controller -->|"18. JSON Response"| User
+
+    classDef layer1 fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef layer2 fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef layer3 fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef layer4 fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef audit fill:#ede7f6,stroke:#512da8,stroke-width:2px;
+    classDef storage fill:#eceff1,stroke:#455a64,stroke-width:2px;
+
+    class Layer1,SecFilter layer1;
+    class Layer2,PIIService,UARegex layer2;
+    class Layer3,SpringAI layer3;
+    class Layer4,OutputGuard layer4;
+    class AuditSystem,AuditLogger audit;
+    class PgVector,Presidio,LLM,AuditDB storage;
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>2. Діаграма послідовності (Sequence Diagram)</h2>
+            <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor User as Користувач (SALES)
+    participant Sec as Spring Security
+    participant Ctrl as Query Controller
+    participant Rag as RAG Orchestrator
+    participant PgVec as pgvector (PostgreSQL)
+    participant PII as PII Masking Service
+    participant Presidio as MS Presidio & UA-Regex
+    participant SpringAI as Spring AI Client
+    participant LLM as Велика Мовна Модель
+    participant Guard as Output Guardrails
+    participant Audit as Access & Audit Log
+
+    User->>Ctrl: POST /api/query ("Знайди інформацію про бонуси...")
+    Ctrl->>Sec: Отримати Authentication & Roles
+    Sec-->>Ctrl: UserPrincipal (роль: USER, відділ: SALES)
+    Ctrl->>Rag: executeQuery(query, userContext)
+
+    rect rgb(225, 245, 254)
+        note over Rag,PgVec: ШАР 1: Pre-retrieval (Фільтрація за метаданими)
+        Rag->>Rag: Сформувати Metadata Filter (department == 'SALES')
+        Rag->>PgVec: Similarity Search (embedding(query), Filter: department == 'SALES')
+        PgVec-->>Rag: Список дозволених фрагментів (виключно документи SALES)
+    end
+
+    rect rgb(255, 243, 224)
+        note over Rag,Presidio: ШАР 2: De-identification (Маскування PII)
+        Rag->>PII: maskSensitiveData(documents)
+        PII->>Presidio: Аналіз PII (ПІБ, адреси, пошта) + UA-Regex (ІПН, тел. +380)
+        Presidio-->>PII: Знайдені чутливі сутності та зміщення (offsets)
+        PII->>PII: Заміна на мітки ([PERSON_1], [PHONE_1], [TAX_ID_1])
+        PII-->>Rag: Очищений, знеособлений контекст
+    end
+
+    rect rgb(232, 245, 233)
+        note over Rag,LLM: ШАР 3: Безпечна генерація (Spring AI)
+        Rag->>SpringAI: buildPrompt(systemInstruction, sanitizedContext, query)
+        SpringAI->>LLM: Chat Completion Request (замаскований контекст + інструкції ізоляції)
+        LLM-->>SpringAI: Згенерована відповідь
+        SpringAI-->>Rag: Текст відповіді моделі
+    end
+
+    rect rgb(252, 228, 236)
+        note over Rag,Guard: ШАР 4: Post-generation (Перевірка витоку)
+        Rag->>Guard: validateOutput(response, originalContext)
+        alt Витік або заборонені маркери не виявлені (SAFE)
+            Guard-->>Rag: Status: APPROVED
+        else Виявлено витік конфіденційних даних / Injection (LEAK DETECTED)
+            Guard-->>Rag: Status: REJECTED
+            Rag->>Rag: Підміна на безпечне повідомлення: "Доступ до запитуваних даних обмежено"
+        end
+    end
+
+    rect rgb(237, 231, 246)
+        note over Rag,Audit: АУДИТ: Фіксація в Журналі доступу
+        Rag->>Audit: logEvent(userId, query, retrievedDocIds, piiStats, guardVerdict)
+        Audit-->>Rag: Event logged (асинхронно)
+    end
+
+    Rag-->>Ctrl: Фінальна безпечна відповідь
+    Ctrl-->>User: HTTP 200 OK (Відповідь без витоків документів та без PII)
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Опис 4-х шарів захисту та їх ролі</h2>
+            <table class="info-table">
+                <thead>
+                    <tr>
+                        <th>Шар захисту</th>
+                        <th>Етап конвеєра</th>
+                        <th>Стек технологій</th>
+                        <th>Від чого захищає</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><b>Шар 1: Pre-retrieval</b></td>
+                        <td>До / під час векторного пошуку</td>
+                        <td>Spring Security, pgvector Metadata Filters</td>
+                        <td>Несанкціонований доступ до документів інших відділів (HR, Finance)</td>
+                    </tr>
+                    <tr>
+                        <td><b>Шар 2: De-identification</b></td>
+                        <td>Після пошуку, до відправки в LLM</td>
+                        <td>Microsoft Presidio, кастомні UA Regex (ІПН, тел, ПІБ)</td>
+                        <td>Витік персональних даних (PII) до хмарних провайдерів LLM</td>
+                    </tr>
+                    <tr>
+                        <td><b>Шар 3: Secured Generation</b></td>
+                        <td>Генерація відповіді</td>
+                        <td>Spring AI ChatClient, System Prompt Guardrails</td>
+                        <td>Indirect Prompt Injection, маніпуляція системними інструкціями</td>
+                    </tr>
+                    <tr>
+                        <td><b>Шар 4: Post-generation</b></td>
+                        <td>Після генерації, до показу клієнту</td>
+                        <td>LLM-as-a-Judge, евристичні фільтри</td>
+                        <td>Випадкові витоки, галюцинації моделі або обхід маскування</td>
+                    </tr>
+                    <tr>
+                        <td><b>Наскрізний аудит</b></td>
+                        <td>Асинхронно на кожному запиті</td>
+                        <td>Spring @Async, Audit Log DB</td>
+                        <td>Відсутність прозорості дій, розслідування інцидентів безпеки</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true,
+                showSequenceNumbers: true
+            }
+        });
+    </script>
+</body>
+</html>

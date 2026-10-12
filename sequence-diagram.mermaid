@@ -1,0 +1,62 @@
+sequenceDiagram
+    autonumber
+    actor User as Користувач (напр. SALES)
+    participant Sec as Spring Security
+    participant Ctrl as Query Controller
+    participant Rag as RAG Orchestrator
+    participant PgVec as pgvector (PostgreSQL)
+    participant PII as PII Masking Service
+    participant Presidio as MS Presidio & UA-Regex
+    participant SpringAI as Spring AI Client
+    participant LLM as Велика Мовна Модель
+    participant Guard as Output Guardrails
+    participant Audit as Access & Audit Log
+
+    User->>Ctrl: POST /api/query ("Знайди інформацію про бонуси...")
+    Ctrl->>Sec: Отримати Authentication & Roles
+    Sec-->>Ctrl: UserPrincipal (роль: USER, відділ: SALES)
+    Ctrl->>Rag: executeQuery(query, userContext)
+
+    rect rgb(225, 245, 254)
+        note over Rag,PgVec: ШАР 1: Pre-retrieval (Фільтрація за метаданими)
+        Rag->>Rag: Сформувати Metadata Filter (department == 'SALES')
+        Rag->>PgVec: Similarity Search (embedding(query), Filter: department == 'SALES')
+        PgVec-->>Rag: Список дозволених фрагментів (виключно документи SALES)
+    end
+
+    rect rgb(255, 243, 224)
+        note over Rag,Presidio: ШАР 2: De-identification (Маскування PII)
+        Rag->>PII: maskSensitiveData(documents)
+        PII->>Presidio: Аналіз PII (ПІБ, адреси, пошта) + UA-Regex (ІПН, тел. +380)
+        Presidio-->>PII: Знайдені чутливі сутності та зміщення (offsets)
+        PII->>PII: Заміна на мітки ([PERSON_1], [PHONE_1], [TAX_ID_1])
+        PII-->>Rag: Очищений, знеособлений контекст
+    end
+
+    rect rgb(232, 245, 233)
+        note over Rag,LLM: ШАР 3: Безпечна генерація (Spring AI)
+        Rag->>SpringAI: buildPrompt(systemInstruction, sanitizedContext, query)
+        SpringAI->>LLM: Chat Completion Request (замаскований контекст + інструкції ізоляції)
+        LLM-->>SpringAI: Згенерована відповідь
+        SpringAI-->>Rag: Текст відповіді моделі
+    end
+
+    rect rgb(252, 228, 236)
+        note over Rag,Guard: ШАР 4: Post-generation (Перевірка витоку)
+        Rag->>Guard: validateOutput(response, originalContext)
+        alt Витік або заборонені маркери не виявлені (SAFE)
+            Guard-->>Rag: Status: APPROVED
+        else Виявлено витік конфіденційних даних / Injection (LEAK DETECTED)
+            Guard-->>Rag: Status: REJECTED
+            Rag->>Rag: Підміна на безпечне повідомлення: "Доступ до запитуваних даних обмежено"
+        end
+    end
+
+    rect rgb(237, 231, 246)
+        note over Rag,Audit: АУДИТ: Фіксація в Журналі доступу
+        Rag->>Audit: logEvent(userId, query, retrievedDocIds, piiStats, guardVerdict)
+        Audit-->>Rag: Event logged (асинхронно)
+    end
+
+    Rag-->>Ctrl: Фінальна безпечна відповідь
+    Ctrl-->>User: HTTP 200 OK (Відповідь без витоків документів та без PII)
